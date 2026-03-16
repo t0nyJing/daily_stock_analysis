@@ -53,21 +53,23 @@ bot/
 ├── __init__.py             # Module entry, exports main classes
 ├── models.py               # Unified message/response models
 ├── dispatcher.py           # Command dispatcher (core)
+├── handler.py              # Webhook handler functions (one per platform)
 ├── commands/               # Command handlers
 │   ├── __init__.py
 │   ├── base.py             # Abstract base class for commands
 │   ├── analyze.py          # /analyze — stock analysis
+│   ├── ask.py              # /ask — single-turn question
+│   ├── batch.py            # /batch — batch watchlist analysis
+│   ├── chat.py             # /chat — multi-turn strategy chat
 │   ├── market.py           # /market — market review
 │   ├── help.py             # /help — help text
 │   └── status.py           # /status — system status
 └── platforms/              # Platform adapters
     ├── __init__.py
     ├── base.py             # Abstract base class for platforms
-    ├── feishu.py           # Feishu (Lark) bot
     ├── dingtalk.py         # DingTalk bot
     ├── dingtalk_stream.py  # DingTalk Stream bot
-    ├── wecom.py            # WeChat Work bot (in development)
-    └── telegram.py         # Telegram bot (in development)
+    └── feishu_stream.py    # Feishu (Lark) Stream bot
 ```
 
 ---
@@ -141,20 +143,22 @@ class BotCommand(ABC):
     def usage(self) -> str: ...
 
     @abstractmethod
-    async def execute(self, message: BotMessage, args: List[str]) -> BotResponse: ...
+    def execute(self, message: BotMessage, args: List[str]) -> BotResponse: ...
 ```
 
 ---
 
 ## 4. Supported Commands
 
-| Command | Aliases | Description | Example |
-|---------|---------|-------------|---------|
-| `/analyze` | `/a` | Analyze a specific stock | `/analyze AAPL` or `/analyze 600519` |
-| `/market` | `/m` | Market review (A-shares / US stocks) | `/market` |
-| `/batch` | `/b` | Batch-analyze your watchlist | `/batch` |
-| `/help` | `/h` | Show help text | `/help` |
-| `/status` | `/s` | Show system status | `/status` |
+| Command | Description | Example |
+|---------|-------------|---------|
+| `/analyze` | Analyze a specific stock | `/analyze AAPL` or `/analyze 600519` |
+| `/ask` | Single-turn question about a stock or the market | `/ask what is RSI for AAPL` |
+| `/batch` | Batch-analyze your configured watchlist | `/batch` |
+| `/chat` | Multi-turn strategy chat (maintains conversation context) | `/chat` |
+| `/market` | Market review (A-shares / US stocks) | `/market` |
+| `/help` | Show help text | `/help` |
+| `/status` | Show system status | `/status` |
 
 > **Stock code formats:** A-shares use 6-digit codes (e.g. `600519`); HK stocks prefix `hk` (e.g. `hk00700`); US stocks use ticker symbols (e.g. `AAPL`, `TSLA`).
 
@@ -162,14 +166,17 @@ class BotCommand(ABC):
 
 ## 5. Webhook Routes
 
-Registered in `api/v1/router.py`:
+The handler functions live in `bot/handler.py` (`handle_feishu_webhook`, `handle_dingtalk_webhook`, etc.).
+The routes below are **planned** — they are not yet wired into the FastAPI application but are ready to be registered:
 
 | Route | Method | Platform |
 |-------|--------|----------|
 | `/bot/feishu` | POST | Feishu (Lark) event callback |
 | `/bot/dingtalk` | POST | DingTalk event callback |
-| `/bot/wecom` | POST | WeChat Work event callback (in development) |
-| `/bot/telegram` | POST | Telegram update callback (in development) |
+| `/bot/wecom` | POST | WeChat Work event callback |
+| `/bot/telegram` | POST | Telegram update callback |
+
+To enable, mount each handler in your FastAPI app or `api/app.py` using `@app.post("/bot/<platform>")`.
 
 ---
 

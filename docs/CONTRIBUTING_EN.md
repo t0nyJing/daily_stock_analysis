@@ -80,7 +80,7 @@ After opening a PR, CI will automatically run the following checks:
 
 | Check | Description | Required |
 |-------|-------------|:--------:|
-| `backend-gate` | `scripts/ci_gate.sh` — py_compile + flake8 critical errors + offline pytest | ✅ |
+| `backend-gate` | `scripts/ci_gate.sh` — py_compile + flake8 critical errors + `./test.sh code` + `./test.sh yfinance` + offline pytest | ✅ |
 | `docker-build` | Docker image build and key module import smoke test | ✅ |
 | `web-gate` | `npm run lint` + `npm run build` (triggered when `apps/dsa-web/` changes) | ✅ (when triggered) |
 | `network-smoke` | Scheduled `pytest -m network` + `test.sh quick` (non-blocking) | ❌ (observational) |
