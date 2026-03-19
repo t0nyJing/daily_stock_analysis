@@ -219,6 +219,34 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         self.assertEqual([item.title for item in intel["risk_check"].results], ["risk_unknown"])
         self.assertIsNone(intel["risk_check"].results[0].published_date)
 
+    def test_search_comprehensive_intel_non_etf_risk_check_stays_strict(self) -> None:
+        """Non-ETF risk_check should keep strict freshness filtering."""
+        fresh_dt = datetime.now(timezone.utc).replace(microsecond=0)
+        fresh_text = fresh_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        expected_fresh_date = fresh_dt.astimezone().date().isoformat()
+
+        service, mock_search = self._create_service_with_mock_provider(
+            news_max_age_days=3,
+            news_strategy_profile="short",
+        )
+        mock_search.side_effect = [
+            _response([_result("latest_news", fresh_text)]),
+            _response([_result("market_analysis_unknown", None)]),
+            _response([_result("risk_unknown", None)]),
+        ]
+
+        with patch("src.search_service.time.sleep"):
+            intel = service.search_comprehensive_intel(
+                stock_code="600519",
+                stock_name="贵州茅台",
+                max_searches=3,
+            )
+
+        self.assertEqual(intel["latest_news"].results[0].published_date, expected_fresh_date)
+        self.assertEqual([item.title for item in intel["market_analysis"].results], ["market_analysis_unknown"])
+        self.assertIsNone(intel["market_analysis"].results[0].published_date)
+        self.assertEqual(intel["risk_check"].results, [])
+
     def test_effective_window_helper_has_no_side_effect(self) -> None:
         """_effective_news_window_days should not mutate stored news_window_days."""
         service, _ = self._create_service_with_mock_provider(
