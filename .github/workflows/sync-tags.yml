@@ -1,7 +1,9 @@
 name: Sync Tags
 
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨 2 点自动执行
+  workflow_dispatch:      # 保留手动触发（随时能点）
 
 jobs:
   sync:
