@@ -18,9 +18,7 @@ jobs:
       new_release: ${{ steps.sync.outputs.new_release }}
       tag_name: ${{ steps.sync.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v5
       
       - name: Sync tags
         run: |
@@ -42,7 +40,7 @@ jobs:
             let newRelease = false;
             let tagName = '';
             
-            for (const release of upstreamReleases.slice(0, 1)) { // 只同步最新的
+            for (const release of upstreamReleases.slice(0, 1)) {
               try {
                 await github.rest.repos.getReleaseByTag({
                   owner: context.repo.owner,
