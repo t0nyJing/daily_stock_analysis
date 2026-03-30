@@ -1,9 +1,9 @@
-name: Sync Tags
+name: Sync Releases
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 每天凌晨 2 点自动执行
-  workflow_dispatch:      # 保留手动触发（随时能点）
+    - cron: '0 2 * * *'  # 每天凌晨2点自动同步
+  workflow_dispatch:      # 可手动触发
 
 jobs:
   sync:
@@ -13,7 +13,59 @@ jobs:
         with:
           fetch-depth: 0
       
-      - run: |
+      - name: Sync tags
+        run: |
           git remote add upstream https://github.com/ZhuLinsen/daily_stock_analysis.git
           git fetch upstream --tags
-          git push origin --tags          
+          git push origin --tags
+      
+      - name: Sync releases with assets
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: upstreamReleases } = await github.rest.repos.listReleases({
+              owner: 'ZhuLinsen',
+              repo: 'daily_stock_analysis'
+            });
+            
+            for (const release of upstreamReleases) {
+              try {
+                // 检查 release 是否已存在
+                await github.rest.repos.getReleaseByTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag: release.tag_name
+                });
+                console.log(`Release ${release.tag_name} already exists, skipping`);
+              } catch (e) {
+                // 创建 release
+                const { data: newRelease } = await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: release.tag_name,
+                  name: release.name,
+                  body: release.body,
+                  draft: release.draft,
+                  prerelease: release.prerelease
+                });
+                console.log(`Created release ${release.tag_name}`);
+                
+                // 同步附件文件（data.csv 等）
+                for (const asset of release.assets) {
+                  console.log(`Downloading asset: ${asset.name}`);
+                  
+                  const response = await fetch(asset.browser_download_url);
+                  const buffer = await response.arrayBuffer();
+                  
+                  await github.rest.repos.uploadReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    release_id: newRelease.id,
+                    name: asset.name,
+                    data: Buffer.from(buffer)
+                  });
+                  console.log(`Uploaded asset: ${asset.name}`);
+                }
+              }
+            }
