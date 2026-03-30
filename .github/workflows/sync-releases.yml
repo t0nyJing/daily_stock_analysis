@@ -1,0 +1,158 @@
+name: Sync Releases and Build Docker
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+env:
+  GHCR_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+  GHCR_IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+
+jobs:
+  sync-releases:
+    runs-on: ubuntu-latest
+    outputs:
+      new_release: ${{ steps.sync.outputs.new_release }}
+      tag_name: ${{ steps.sync.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Sync tags
+        run: |
+          git remote add upstream https://github.com/ZhuLinsen/daily_stock_analysis.git
+          git fetch upstream --tags
+          git push origin --tags
+      
+      - name: Sync releases with assets
+        id: sync
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: upstreamReleases } = await github.rest.repos.listReleases({
+              owner: 'ZhuLinsen',
+              repo: 'daily_stock_analysis'
+            });
+            
+            let newRelease = false;
+            let tagName = '';
+            
+            for (const release of upstreamReleases.slice(0, 1)) { // 只同步最新的
+              try {
+                await github.rest.repos.getReleaseByTag({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag: release.tag_name
+                });
+                console.log(`Release ${release.tag_name} already exists`);
+              } catch (e) {
+                newRelease = true;
+                tagName = release.tag_name;
+                
+                const { data: newReleaseData } = await github.rest.repos.createRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  tag_name: release.tag_name,
+                  name: release.name,
+                  body: release.body,
+                  draft: release.draft,
+                  prerelease: release.prerelease
+                });
+                console.log(`Created release ${release.tag_name}`);
+                
+                for (const asset of release.assets) {
+                  const response = await fetch(asset.browser_download_url);
+                  const buffer = await response.arrayBuffer();
+                  
+                  await github.rest.repos.uploadReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    release_id: newReleaseData.id,
+                    name: asset.name,
+                    data: Buffer.from(buffer)
+                  });
+                  console.log(`Uploaded ${asset.name}`);
+                }
+              }
+            }
+            
+            core.setOutput('new_release', newRelease);
+            core.setOutput('tag_name', tagName);
+
+  build-docker:
+    needs: sync-releases
+    runs-on: ubuntu-24.04
+    if: ${{ needs.sync-releases.outputs.new_release == 'true' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:master
+            network=host
+
+      - name: Set up QEMU for multi-platform build
+        uses: docker/setup-qemu-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKERHUB_REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for GHCR
+        id: meta-ghcr
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.sync-releases.outputs.tag_name }}
+            type=raw,value=latest
+          flavor: |
+            latest=true
+
+      - name: Extract metadata for Docker Hub
+        id: meta-dockerhub
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_REGISTRY }}/${{ env.DOCKERHUB_IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.sync-releases.outputs.tag_name }}
+            type=raw,value=latest
+          flavor: |
+            latest=true
+
+      - name: Build and push multi-arch images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta-ghcr.outputs.tags }}
+            ${{ steps.meta-dockerhub.outputs.tags }}
+          labels: ${{ steps.meta-ghcr.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
